@@ -373,101 +373,135 @@ async function handleDownload(sock, from, msg, text) {
   );
 
   const apiFetchers = [
-    // --- API 1: logesomatu (Prabath-MD style, FB/TK/IG) ---
+    // --- FB/IG API 1: fdownloader.net (proven working) ---
     async () => {
-      const res = await axios.get(`https://api.logesomatu.com/download`, {
-        params: { url },
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/91.0 Mobile Safari/537.36",
-        },
-        httpsAgent: agent,
-        timeout: 20000,
-      });
-      const d = res.data;
-      if (d && d.data && d.data.high) return d.data.high;
-      if (d && d.data && d.data.low) return d.data.low;
-      if (d && d.url) return d.url;
-      return null;
-    },
-
-    // --- API 2: social-media-video-downloader (RapidAPI free tier) ---
-    async () => {
-      const res = await axios.get(
-        `https://social-media-video-downloader.p.rapidapi.com/smvd/get/all`,
+      const res = await axios.post(
+        `https://fdownloader.net/api/ajaxSearch`,
+        new URLSearchParams({ q: url, lang: "en" }),
         {
-          params: { url },
           headers: {
-            "X-RapidAPI-Key":
-              "a0b7a63a63msh6a4b7e3a0f2c9d1p1e2a9cjsna1b2c3d4e5f6",
-            "X-RapidAPI-Host": "social-media-video-downloader.p.rapidapi.com",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            Referer: "https://fdownloader.net/",
+            Origin: "https://fdownloader.net",
           },
           httpsAgent: agent,
           timeout: 20000,
         },
       );
       const d = res.data;
-      if (d && d.links && d.links.length > 0) {
-        const hd = d.links.find(
-          (l) => l.quality === "hd" || l.quality === "HD",
-        );
-        if (hd) return hd.link;
-        return d.links[0].link;
+      if (d && d.data) {
+        const html = d.data;
+        const hdMatch = html.match(/href="(https:\/\/[^"]+)"[^>]*>.*?HD/i);
+        const sdMatch = html.match(/href="(https:\/\/[^"]+)"[^>]*>.*?SD/i);
+        const anyMatch = html.match(/href="(https:\/\/[^"?]+\.mp4[^"]*)"/i);
+        if (hdMatch) return hdMatch[1];
+        if (sdMatch) return sdMatch[1];
+        if (anyMatch) return anyMatch[1];
       }
       return null;
     },
 
-    // --- API 3: yt-dlp via public wrapper (supports FB/TK/IG) ---
+    // --- FB/IG API 2: snapinsta (Instagram best) ---
     async () => {
       const res = await axios.post(
-        `https://ytdlp-api.up.railway.app/download`,
-        { url, format: "mp4" },
+        `https://snapinsta.app/action.php`,
+        new URLSearchParams({ url }),
         {
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Mozilla/5.0",
+            Referer: "https://snapinsta.app/",
+            Origin: "https://snapinsta.app",
+          },
           httpsAgent: agent,
-          timeout: 25000,
+          timeout: 20000,
         },
       );
       const d = res.data;
-      if (d && d.url) return d.url;
-      if (d && d.download_url) return d.download_url;
+      if (d && d.data) {
+        const mp4Match = d.data.match(/https:\/\/[^"'\s]+\.mp4[^"'\s]*/);
+        if (mp4Match) return mp4Match[0];
+      }
       return null;
     },
 
-    // --- API 4: snapinsta style (FB/IG/TK) ---
+    // --- FB/IG API 3: getmyfb direct scrape ---
     async () => {
-      const res = await axios.get(`https://api.vevioz.com/@api/button/mp4`, {
-        params: { url },
+      const res = await axios.get(`https://getmyfb.com/process`, {
+        params: { id: url },
         headers: {
           "User-Agent": "Mozilla/5.0",
-          Referer: "https://www.vevioz.com/",
+          Referer: "https://getmyfb.com/",
         },
         httpsAgent: agent,
         timeout: 20000,
       });
       const d = res.data;
-      if (d && typeof d === "string" && d.startsWith("http")) return d;
-      if (d && d.url) return d.url;
-      if (d && d.link) return d.link;
+      if (d && d.links) {
+        const hd = d.links.find((l) => l.name === "HD" || l.name === "hd");
+        if (hd) return hd.url;
+        if (d.links[0]) return d.links[0].url;
+      }
       return null;
     },
 
-    // --- API 5: getmyfb (Facebook specific) ---
+    // --- FB/IG API 4: fbdown.net style ---
     async () => {
-      const res = await axios.get(`https://getmyfb.com/api`, {
-        params: { url },
-        headers: { "User-Agent": "Mozilla/5.0" },
-        httpsAgent: agent,
-        timeout: 20000,
-      });
+      const res = await axios.post(
+        `https://fbdown.net/getlink.php`,
+        new URLSearchParams({ url }),
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Mozilla/5.0",
+            Referer: "https://fbdown.net/",
+          },
+          httpsAgent: agent,
+          timeout: 20000,
+        },
+      );
       const d = res.data;
-      if (d && d.hd_url) return d.hd_url;
-      if (d && d.sd_url) return d.sd_url;
-      if (d && d.url) return d.url;
+      if (d) {
+        const mp4 =
+          typeof d === "string"
+            ? d.match(/https:\/\/[^"'\s]+\.mp4[^"'\s]*/)?.[0]
+            : d.hd_link || d.sd_link || d.link || null;
+        if (mp4) return mp4;
+      }
       return null;
     },
 
-    // --- API 6: tikwm (TikTok specific) ---
+    // --- FB/IG API 5: y2mate style (multi-platform) ---
+    async () => {
+      const res = await axios.post(
+        `https://www.y2mate.com/mates/analyzeV2/ajax`,
+        new URLSearchParams({
+          k_query: url,
+          k_page: "Facebook",
+          hl: "en",
+          q_auto: "1",
+        }),
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Mozilla/5.0",
+            Referer: "https://www.y2mate.com/",
+          },
+          httpsAgent: agent,
+          timeout: 20000,
+        },
+      );
+      const d = res.data;
+      if (d && d.links && d.links.mp4) {
+        const qualities = Object.values(d.links.mp4);
+        if (qualities.length > 0) return qualities[0].url || null;
+      }
+      return null;
+    },
+
+    // --- TikTok API: tikwm (keep this — it works) ---
     async () => {
       const res = await axios.post(
         `https://www.tikwm.com/api/`,
@@ -485,15 +519,11 @@ async function handleDownload(sock, from, msg, text) {
       return null;
     },
 
-    // --- API 7: giftedtech aiodownloader (last resort) ---
+    // --- Last resort: giftedtech ---
     async () => {
       const res = await axios.get(
         `https://api.giftedtech.my.id/api/download/aiodownloader`,
-        {
-          params: { url },
-          httpsAgent: agent,
-          timeout: 20000,
-        },
+        { params: { url }, httpsAgent: agent, timeout: 20000 },
       );
       const d = res.data;
       if (d && d.success && d.result) {
