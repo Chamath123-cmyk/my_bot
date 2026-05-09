@@ -143,7 +143,29 @@ async function connectToWhatsApp() {
 
     if (msg.key.fromMe) return;
 
-    const hiMessages = ["hii", "hi", "hy", "hyy", "hyyy", "ee", "eee", "eeee", "e bn", "kammliy", "kmmliy", "kmmliya", "ei", "eii", "eiii", "hutto", "huttoo", "huttooo", "me", "mee", "meee"];
+    const hiMessages = [
+      "hii",
+      "hi",
+      "hy",
+      "hyy",
+      "hyyy",
+      "ee",
+      "eee",
+      "eeee",
+      "e bn",
+      "kammliy",
+      "kmmliy",
+      "kmmliya",
+      "ei",
+      "eii",
+      "eiii",
+      "hutto",
+      "huttoo",
+      "huttooo",
+      "me",
+      "mee",
+      "meee",
+    ];
     if (hiMessages.includes(lowerText)) {
       const infoMessage = `👋 Hello! Hii...\n\nI'm Chamath's private bot assistant.\n\n👤 *Creator Details:*\n• owner: Chamath N Dissanayake\n• Status: Bot Developer\n• FB profile: https://www.facebook.com/Chamathndissanayake\n\n🤖 *Bot Details:*\n• Name: Multi-Downloader Bot\n• Function: Download Videos from FB, TikTok, IG\n• Status: Active(Under development)\n\n🚀 *Commands:*\n• .fb [link] - Facebook Downloader\n• .tk [link] - TikTok Downloader\n• .ig [link] - Instagram Downloader\n\n© Powered by Chamath N Dissanayake`;
       return await sock.sendMessage(
@@ -191,7 +213,8 @@ async function handleInfo(sock, from, msg) {
     try {
       ppUrl = await sock.profilePictureUrl(targetJid, "image");
     } catch {
-      ppUrl = "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png";
+      ppUrl =
+        "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png";
     }
     let status;
     try {
@@ -211,33 +234,130 @@ async function handleInfo(sock, from, msg) {
   }
 }
 
-// Handle Download function - නිවැරදි කළ කොටස
+// Handle Download function - Multiple API fallback system
 async function handleDownload(sock, from, msg, text) {
-  const url = text.split(" ")[1];
-  if (!url) return sock.sendMessage(from, { text: "කරුණාකර ලින්ක් එකක් ලබාදෙන්න!" });
-  
-  try {
-    await sock.sendMessage(from, { text: "වීඩියෝව සකස් කරමින් පවතිනවා... ⏳" });
-    
-    // දැනට වැඩ කරන ස්ථාවර API එකක් භාවිතා කිරීම
-    let apiUrl = `https://api.giftedtech.my.id/api/download/dl?url=${encodeURIComponent(url)}`;
-    const res = await axios.get(apiUrl, { httpsAgent: agent });
-    
-    if (res.data && res.data.success) {
-      const videoLink = res.data.result.download_url || res.data.result.url;
-      if (videoLink) {
-        return await sock.sendMessage(
-          from,
-          { video: { url: videoLink }, caption: "✅ සාර්ථකව ඩවුන්ලෝඩ් වුණා!" },
-          { quoted: msg }
+  const parts = text.trim().split(/\s+/);
+  const url = parts[1];
+  if (!url)
+    return sock.sendMessage(from, { text: "කරුණාකර ලින්ක් එකක් ලබාදෙන්න! 🔗" });
+
+  await sock.sendMessage(
+    from,
+    { text: "⏳ වීඩියෝව සකස් කරමින් පවතිනවා..." },
+    { quoted: msg },
+  );
+
+  // API list — in order of priority
+  const apiFetchers = [
+    // --- API 1: savefrom.net API ---
+    async () => {
+      const res = await axios.get(`https://worker.savefrom.net/api/convert`, {
+        params: { url },
+        headers: { "User-Agent": "Mozilla/5.0" },
+        httpsAgent: agent,
+        timeout: 15000,
+      });
+      const d = res.data;
+      if (d && d.url && d.url[0] && d.url[0].url) {
+        return d.url[0].url;
+      }
+      return null;
+    },
+
+    // --- API 2: co.wuk (social downloader) ---
+    async () => {
+      const res = await axios.post(
+        "https://co.wuk.sh/api/json",
+        { url },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          httpsAgent: agent,
+          timeout: 15000,
+        },
+      );
+      const d = res.data;
+      if (d && d.url) return d.url;
+      return null;
+    },
+
+    // --- API 3: giftedtech (original, with better response parsing) ---
+    async () => {
+      const res = await axios.get(
+        `https://api.giftedtech.my.id/api/download/dl`,
+        {
+          params: { url },
+          httpsAgent: agent,
+          timeout: 15000,
+        },
+      );
+      const d = res.data;
+      if (d && d.success && d.result) {
+        return (
+          d.result.download_url ||
+          d.result.url ||
+          d.result.video ||
+          (Array.isArray(d.result.medias) && d.result.medias[0]?.url) ||
+          null
         );
       }
-    }
-    await sock.sendMessage(from, { text: "වීඩියෝව සොයාගත නොහැකි විය. ලින්ක් එක නිවැරදිදැයි බලන්න." });
-  } catch (e) {
-    console.error(e);
-    await sock.sendMessage(from, { text: "සර්වර් එකේ දෝෂයක්. පසුව උත්සාහ කරන්න." });
-  }
-}
+      return null;
+    },
 
+    // --- API 4: all-in-one downloader (aio) ---
+    async () => {
+      const res = await axios.get(
+        `https://api.giftedtech.my.id/api/download/aiodownloader`,
+        {
+          params: { url },
+          httpsAgent: agent,
+          timeout: 15000,
+        },
+      );
+      const d = res.data;
+      if (d && d.success && d.result) {
+        return d.result.download_url || d.result.url || d.result.video || null;
+      }
+      return null;
+    },
+  ];
+
+  let videoLink = null;
+
+  for (const fetcher of apiFetchers) {
+    try {
+      videoLink = await fetcher();
+      if (videoLink) break; // found a working one — stop
+    } catch (err) {
+      // This API failed — try next one silently
+      console.error("Downloader API failed:", err.message);
+    }
+  }
+
+  if (videoLink) {
+    try {
+      return await sock.sendMessage(
+        from,
+        {
+          video: { url: videoLink },
+          caption:
+            "✅ සාර්ථකව ඩවුන්ලෝඩ් වුණා!\n\n🤖 _Chamath's Bot Assistant_\n© Powered by 🔰*Chamath N Dissanayake*",
+        },
+        { quoted: msg },
+      );
+    } catch (sendErr) {
+      console.error("Video send failed:", sendErr.message);
+      return await sock.sendMessage(from, {
+        text: `📎 වීඩියෝ link එක:\n${videoLink}\n\n(Bot ට directly send කරන්න බැරි වුණා. ඉහත link එකෙන් ගන්න.)`,
+      });
+    }
+  }
+
+  // All APIs failed
+  return await sock.sendMessage(from, {
+    text: "❌ සියලු servers fail වුණා. කරුණාකර:\n• Link එක නිවැරදිදැයි check කරන්න\n• ටික වෙලාවකට පස්සේ උත්සාහ කරන්න\n• Private/restricted videos download කරන්න බැහැ 🔒",
+  });
+}
 connectToWhatsApp();
