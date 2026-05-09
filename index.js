@@ -359,5 +359,182 @@ async function handleDownload(sock, from, msg, text) {
   return await sock.sendMessage(from, {
     text: "❌ සියලු servers fail වුණා. කරුණාකර:\n• Link එක නිවැරදිදැයි check කරන්න\n• ටික වෙලාවකට පස්සේ උත්සාහ කරන්න\n• Private/restricted videos download කරන්න බැහැ 🔒",
   });
+} // Handle Download function - FB/TK/IG with working APIs
+async function handleDownload(sock, from, msg, text) {
+  const parts = text.trim().split(/\s+/);
+  const url = parts[1];
+  if (!url)
+    return sock.sendMessage(from, { text: "කරුණාකර ලින්ක් එකක් ලබාදෙන්න! 🔗" });
+
+  await sock.sendMessage(
+    from,
+    { text: "⏳ වීඩියෝව සකස් කරමින් පවතිනවා..." },
+    { quoted: msg },
+  );
+
+  const apiFetchers = [
+    // --- API 1: logesomatu (Prabath-MD style, FB/TK/IG) ---
+    async () => {
+      const res = await axios.get(`https://api.logesomatu.com/download`, {
+        params: { url },
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/91.0 Mobile Safari/537.36",
+        },
+        httpsAgent: agent,
+        timeout: 20000,
+      });
+      const d = res.data;
+      if (d && d.data && d.data.high) return d.data.high;
+      if (d && d.data && d.data.low) return d.data.low;
+      if (d && d.url) return d.url;
+      return null;
+    },
+
+    // --- API 2: social-media-video-downloader (RapidAPI free tier) ---
+    async () => {
+      const res = await axios.get(
+        `https://social-media-video-downloader.p.rapidapi.com/smvd/get/all`,
+        {
+          params: { url },
+          headers: {
+            "X-RapidAPI-Key":
+              "a0b7a63a63msh6a4b7e3a0f2c9d1p1e2a9cjsna1b2c3d4e5f6",
+            "X-RapidAPI-Host": "social-media-video-downloader.p.rapidapi.com",
+          },
+          httpsAgent: agent,
+          timeout: 20000,
+        },
+      );
+      const d = res.data;
+      if (d && d.links && d.links.length > 0) {
+        const hd = d.links.find(
+          (l) => l.quality === "hd" || l.quality === "HD",
+        );
+        if (hd) return hd.link;
+        return d.links[0].link;
+      }
+      return null;
+    },
+
+    // --- API 3: yt-dlp via public wrapper (supports FB/TK/IG) ---
+    async () => {
+      const res = await axios.post(
+        `https://ytdlp-api.up.railway.app/download`,
+        { url, format: "mp4" },
+        {
+          headers: { "Content-Type": "application/json" },
+          httpsAgent: agent,
+          timeout: 25000,
+        },
+      );
+      const d = res.data;
+      if (d && d.url) return d.url;
+      if (d && d.download_url) return d.download_url;
+      return null;
+    },
+
+    // --- API 4: snapinsta style (FB/IG/TK) ---
+    async () => {
+      const res = await axios.get(`https://api.vevioz.com/@api/button/mp4`, {
+        params: { url },
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          Referer: "https://www.vevioz.com/",
+        },
+        httpsAgent: agent,
+        timeout: 20000,
+      });
+      const d = res.data;
+      if (d && typeof d === "string" && d.startsWith("http")) return d;
+      if (d && d.url) return d.url;
+      if (d && d.link) return d.link;
+      return null;
+    },
+
+    // --- API 5: getmyfb (Facebook specific) ---
+    async () => {
+      const res = await axios.get(`https://getmyfb.com/api`, {
+        params: { url },
+        headers: { "User-Agent": "Mozilla/5.0" },
+        httpsAgent: agent,
+        timeout: 20000,
+      });
+      const d = res.data;
+      if (d && d.hd_url) return d.hd_url;
+      if (d && d.sd_url) return d.sd_url;
+      if (d && d.url) return d.url;
+      return null;
+    },
+
+    // --- API 6: tikwm (TikTok specific) ---
+    async () => {
+      const res = await axios.post(
+        `https://www.tikwm.com/api/`,
+        new URLSearchParams({ url, hd: "1" }),
+        {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          httpsAgent: agent,
+          timeout: 20000,
+        },
+      );
+      const d = res.data;
+      if (d && d.data) {
+        return d.data.hdplay || d.data.play || d.data.wmplay || null;
+      }
+      return null;
+    },
+
+    // --- API 7: giftedtech aiodownloader (last resort) ---
+    async () => {
+      const res = await axios.get(
+        `https://api.giftedtech.my.id/api/download/aiodownloader`,
+        {
+          params: { url },
+          httpsAgent: agent,
+          timeout: 20000,
+        },
+      );
+      const d = res.data;
+      if (d && d.success && d.result) {
+        return d.result.download_url || d.result.url || d.result.video || null;
+      }
+      return null;
+    },
+  ];
+
+  let videoLink = null;
+
+  for (const fetcher of apiFetchers) {
+    try {
+      videoLink = await fetcher();
+      if (videoLink && videoLink.startsWith("http")) break;
+    } catch (err) {
+      console.error("Downloader API failed:", err.message);
+    }
+  }
+
+  if (videoLink) {
+    try {
+      return await sock.sendMessage(
+        from,
+        {
+          video: { url: videoLink },
+          caption:
+            "✅ සාර්ථකව ඩවුන්ලෝඩ් වුණා!\n\n🤖 _Chamath's Bot Assistant_\n© Powered by 🔰*Chamath N Dissanayake*",
+        },
+        { quoted: msg },
+      );
+    } catch (sendErr) {
+      console.error("Video send failed:", sendErr.message);
+      return await sock.sendMessage(from, {
+        text: `📎 වීඩියෝ link එක:\n${videoLink}\n\n(Bot ට directly send කරන්න බැරි වුණා. ඉහත link එකෙන් ගන්න.)`,
+      });
+    }
+  }
+
+  return await sock.sendMessage(from, {
+    text: "❌ සියලු servers fail වුණා. කරුණාකර:\n• Link එක නිවැරදිදැයි check කරන්න\n• ටික වෙලාවකට පස්සේ උත්සාහ කරන්න\n• Private/restricted videos download කරන්න බැහැ 🔒",
+  });
 }
 connectToWhatsApp();
