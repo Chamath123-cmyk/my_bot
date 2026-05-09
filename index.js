@@ -35,7 +35,7 @@ async function connectToWhatsApp() {
   });
 
   if (!sock.authState.creds.registered) {
-    const phoneNumber = "94787418492";
+    const phoneNumber = "94712200190";
     setTimeout(async () => {
       try {
         let code = await sock.requestPairingCode(phoneNumber);
