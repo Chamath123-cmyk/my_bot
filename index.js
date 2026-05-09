@@ -11,6 +11,14 @@ const { Boom } = require("@hapi/boom");
 const P = require("pino");
 const axios = require("axios");
 const https = require("https");
+const express = require("express"); // Railway එකේ keep-alive තබා ගැනීමට අවශ්‍යයි
+const fs = require("fs");
+
+// Railway එකේ Crash නොවී තබා ගැනීමට Express සේවාදායකය
+const app = express();
+const port = process.env.PORT || 8080;
+app.get("/", (req, res) => res.send("Bot is Running... ✅"));
+app.listen(port, () => console.log(`Server started on port ${port}`));
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
@@ -18,6 +26,11 @@ let lastAutoReplyTime = {};
 const ownerNumber = "94702903738@s.whatsapp.net";
 
 async function connectToWhatsApp() {
+  // Auth folder එක නැතිනම් සාදා ගැනීම (Railway Crash වැළැක්වීමට)
+  if (!fs.existsSync("./auth_info_baileys")) {
+    fs.mkdirSync("./auth_info_baileys");
+  }
+
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
   const { version } = await fetchLatestBaileysVersion();
 
@@ -52,9 +65,9 @@ async function connectToWhatsApp() {
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect } = update;
     if (connection === "close") {
-      const shouldReconnect =
-        (lastDisconnect.error instanceof Boom)?.output?.statusCode !==
-        DisconnectReason.loggedOut;
+      const statusCode = (lastDisconnect.error instanceof Boom)?.output
+        ?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) connectToWhatsApp();
     } else if (connection === "open") {
       console.log("✅ බොට් සාර්ථකව සම්බන්ධ වුණා!");
@@ -65,7 +78,7 @@ async function connectToWhatsApp() {
 
   sock.ev.on("messages.upsert", async (m) => {
     const msg = m.messages[0];
-    if (!msg.message) return;
+    if (!msg.message || msg.key.remoteJid === "status@broadcast") return;
 
     const from = msg.key.remoteJid;
     const isOwner = msg.key.fromMe || from === ownerNumber;
@@ -75,31 +88,25 @@ async function connectToWhatsApp() {
 
     // --- OWNER COMMANDS ---
     if (isOwner) {
-      // BLOCK COMMAND
       if (lowerText === ".block") {
         await sock.sendMessage(from, {
           text: "🚫 ඔබව Chamath විසින් Block කරනු ලැබුවා. මින් ඉදිරියට ඔබට පණිවිඩ එවීමට නොහැක.",
         });
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Message එක යනකම් තත්පරයක් ඉන්නවා
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         await sock.updateBlockStatus(from, "block");
         return;
       }
-
-      // UNBLOCK COMMAND
       if (lowerText === ".unblock") {
         await sock.updateBlockStatus(from, "unblock");
         return await sock.sendMessage(from, {
           text: "✅ ඔබව Chamath විසින් සාර්ථකව Unblock කරනු ලැබුවා.",
         });
       }
-
-      // CLEAR COMMAND
       if (lowerText === ".clear") {
         await sock.sendMessage(from, {
           text: "🗑️ මෙම චැට් එක සාර්ථකව Clear කරන ලදී.",
         });
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        await sock.chatModify(
+        return await sock.chatModify(
           {
             delete: true,
             lastMessages: [
@@ -108,15 +115,10 @@ async function connectToWhatsApp() {
           },
           from,
         );
-        return;
       }
-
-      if (lowerText === ".info") {
-        return await handleInfo(sock, from, msg);
-      }
-
+      if (lowerText === ".info") return await handleInfo(sock, from, msg);
       if (lowerText === ".menu") {
-        const menuText = `🛠️ *BOT COMMAND MENU* 🛠️\n\n*Owner Commands:* \n• .block - Block current chat\n• .unblock - Unblock current chat\n• .clear - Clear chat\n• .info - Get user details\n\n*Downloader:* \n• .fb [link]\n• .tk [link]\n• .ig [link]\n\n*General:* \n• .owner - Admin info\n\n© Chamath N Dissanayake`;
+        const menuText = `🛠️ *BOT COMMAND MENU* 🛠️\n\n*Owner Commands:* \n• .block\n• .unblock\n• .clear\n• .info\n\n*Downloader:* \n• .fb [link]\n• .tk [link]\n• .ig [link]\n\n*General:* \n• .owner\n\n© Chamath N Dissanayake`;
         return await sock.sendMessage(
           from,
           { text: menuText },
@@ -125,11 +127,10 @@ async function connectToWhatsApp() {
       }
     }
 
-    // --- PUBLIC COMMANDS & AUTO REPLIES (ඔයාට ඉහලින් දීපු විදියටම තියෙනවා) ---
     if (lowerText === ".owner") {
       const ownerImg =
-        "https://raw.githubusercontent.com/Chamath123-cmyk/my_bot/main/owner.jpeg";
-      const ownerInfo = `👤 *OWNER DETAILS*\n\n• *Name:* Chamath N Dissanayake\n• *Role:* Bot Developer\n• *FB Page:* https://www.facebook.com/Chamathndissanayake\n\n© Powered by Chamath N Dissanayake`;
+        "https://raw.githubusercontent.com/Chamath123-cmyk/my_bot/main/owner.jpg";
+      const ownerInfo = `👤 *OWNER DETAILS*\n\n• *Name:* Chamath N Dissanayake\n• *FB Page:* https://www.facebook.com/Chamathndissanayake`;
       return await sock.sendMessage(
         from,
         { image: { url: ownerImg }, caption: ownerInfo },
@@ -147,31 +148,9 @@ async function connectToWhatsApp() {
 
     if (msg.key.fromMe) return;
 
-    const hiMessages = [
-      "hii",
-      "hi",
-      "hy",
-      "hyy",
-      "hyyy",
-      "ee",
-      "eee",
-      "eeee",
-      "e bn",
-      "kammliy",
-      "kmmliy",
-      "kmmliya",
-      "ei",
-      "eii",
-      "eiii",
-      "hutto",
-      "huttoo",
-      "huttooo",
-      "me",
-      "mee",
-      "meee",
-    ];
-    if (hiMessages.includes(lowerText)) {
-      const infoMessage = `👋 Hello! Hii...\n\nI'm Dulina's private bot assistant.\n\n👤 *Creator Details:*\n• owner: Chamath N Dissanayake\n• Status: Bot Developer\n• FB profile: https://www.facebook.com/share/p/1BAip71vk6/?mibextid=wwXIfr\n\n🤖 *Bot Details:*\n• Name: Multi-Downloader Bot\n• Function: Download Videos from FB, TikTok, IG\n• Status: Active(Under development)\n\n🚀 *Commands:*\n• .fb [link] - Facebook Downloader\n• .tk [link] - TikTok Downloader\n• .ig [link] - Instagram Downloader\n\n© Powered by Chamath N Dissanayake`;
+    const hiMessages = ["hii", "hi", "hy", "ee", "ei", "hutto", "me"];
+    if (hiMessages.some((h) => lowerText.startsWith(h))) {
+      const infoMessage = `👋 Hello! Hii...\n\nI'm Chamath's private bot assistant.\n\n🚀 *Commands:*\n• .fb [link]\n• .tk [link]\n• .ig [link]`;
       return await sock.sendMessage(
         from,
         { text: infoMessage },
@@ -180,26 +159,27 @@ async function connectToWhatsApp() {
     }
 
     if (lowerText === "1") {
-      const reply1 = `අනුන්ගේ දේවල් සොයන්නට ගොස් තමන්ගේ කාලය නිකරුණේ නාස්ති කරගන්න එපා❌. ඔබේ දියුණුව සඳහා වැඩක් කරගන්න. ස්තූතියි!⚠️\n\n🤖_Chamath's Bot Assistant_\n© Powered by 🔰*Chamath N Dissanayake*`;
       const rawVideoUrl =
         "https://raw.githubusercontent.com/Chamath123-cmyk/my_bot/main/video.mp4";
       return await sock.sendMessage(
         from,
-        { video: { url: rawVideoUrl }, caption: reply1 },
+        { video: { url: rawVideoUrl }, caption: "🤖 Chamath's Bot Assistant" },
         { quoted: msg },
       );
     }
 
     if (lowerText === "2" || lowerText === "3") {
-      const replyRest = `Chamath එනකම් රැඳී සිටින්න.🕐 ඔහු ඉක්මනින් ඔබව සම්බන්ධ කර ගනීවි.\n\n🤖_Chamath's Bot Assistant_\n© Powered by 🔰*Chamath N Dissanayake*`;
-      return await sock.sendMessage(from, { text: replyRest }, { quoted: msg });
+      return await sock.sendMessage(
+        from,
+        { text: "Chamath එනකම් රැඳී සිටින්න.🕐" },
+        { quoted: msg },
+      );
     }
 
     if (!from.endsWith("@g.us")) {
       const now = Date.now();
-      const lastTime = lastAutoReplyTime[from] || 0;
-      if (now - lastTime > 1800000) {
-        const autoReplyMenu = `Chamathමේ මොහොතේ කාර්යබහුලයි📵. ඔබ පැමිණි කාරණය කෙටියෙන් ඉදිරිපත් කරන්න. මම දුලින ගේ සහායක බොට් (Dulina's Bot Assistant) 🤖.\n\nඔබ පැමිණියේ:🚀 \n1️⃣. Results ඇසීමට නම් ⚠️ - (1)\n2️⃣. පෞද්ගලික යමක් කතා කිරීමට නම් - (2)\n3️⃣. වෙනත් දෙයක් කතා කිරීමට නම් - (3)\n\nකරුණාකර අදාළ අංකය ඇතුළත් කර එවන්න.🔢\n\n🤖_Dulina's Bot Assistant_\n© Powered by 🔰*Chamath N Dissanayake*`;
+      if (now - (lastAutoReplyTime[from] || 0) > 1800000) {
+        const autoReplyMenu = `Chamath N Dissanayake මේ මොහොතේ කාර්යබහුලයි📵.\n\n1️⃣. Results ඇසීමට (1)\n2️⃣. පෞද්ගලික යමක් (2)\n3️⃣. වෙනත් දෙයක් (3)`;
         await sock.sendMessage(from, { text: autoReplyMenu }, { quoted: msg });
         lastAutoReplyTime[from] = now;
       }
@@ -207,13 +187,10 @@ async function connectToWhatsApp() {
   });
 }
 
-// Handle Info function
 async function handleInfo(sock, from, msg) {
   try {
     const isGroup = from.endsWith("@g.us");
     const targetJid = isGroup ? msg.key.participant || msg.key.remoteJid : from;
-    const targetNumber = targetJid.split("@")[0].split(":")[0];
-    let targetName = msg.pushName || "User";
     let ppUrl;
     try {
       ppUrl = await sock.profilePictureUrl(targetJid, "image");
@@ -221,14 +198,8 @@ async function handleInfo(sock, from, msg) {
       ppUrl =
         "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png";
     }
-    let status;
-    try {
-      const statusData = await sock.fetchStatus(targetJid);
-      status = statusData.status || "No Status";
-    } catch {
-      status = "Privacy Protected";
-    }
-    const infoText = `👤 *USER INFORMATION* 👤\n\n🔹 *Name:* ${targetName}\n🔹 *Number:* ${targetNumber}\n🔹 *About:* ${status}\n\n🚀 *Bot by Chamath N Dissanayake*`;
+
+    const infoText = `👤 *USER INFORMATION*\n🔹 *Number:* ${targetJid.split("@")[0]}`;
     await sock.sendMessage(
       from,
       { image: { url: ppUrl }, caption: infoText },
@@ -239,40 +210,29 @@ async function handleInfo(sock, from, msg) {
   }
 }
 
-// Handle Download function
 async function handleDownload(sock, from, msg, text) {
-  const cmd = text.split(" ")[0];
   const url = text.split(" ")[1];
   if (!url)
     return sock.sendMessage(from, { text: "කරුණාකර ලින්ක් එකක් ලබාදෙන්න!" });
   try {
     await sock.sendMessage(from, { text: "වීඩියෝව සකස් කරමින් පවතිනවා... ⏳" });
-    let apiUrl = "";
-    if (cmd === ".fb")
-      apiUrl = `https://dark-yoshio-official.vercel.app/api/downloader/fbdl?url=${url}`;
-    if (cmd === ".tk")
-      apiUrl = `https://dark-yoshio-official.vercel.app/api/downloader/tiktok?url=${url}`;
-    if (cmd === ".ig")
-      apiUrl = `https://dark-yoshio-official.vercel.app/api/downloader/igdl?url=${url}`;
-    const res = await axios.get(apiUrl, { httpsAgent: agent });
-    const result = res.data.result;
-    const videoLink =
-      result.url ||
-      result.video ||
-      result.hd ||
-      result.sd ||
-      (result[0] && result[0].url);
-    if (videoLink) {
+    let apiUrl = `https://api.giftedtech.my.id/api/download/dl?url=${encodeURIComponent(url)}`;
+
+    const res = await axios.get(apiUrl, { httpsAgent: agent, timeout: 30000 });
+    const data = res.data;
+
+    if (data.success && data.result) {
+      const videoLink = data.result.download_url || data.result.url;
       await sock.sendMessage(
         from,
-        { video: { url: videoLink }, caption: "✅ සාර්ථකව ඩවුන්ලෝඩ් වුණා!" },
+        { video: { url: videoLink }, caption: "✅ සාර්ථකයි!" },
         { quoted: msg },
       );
     } else {
       await sock.sendMessage(from, { text: "වීඩියෝව සොයාගත නොහැකි විය." });
     }
   } catch (e) {
-    await sock.sendMessage(from, { text: "සර්වර් එකේ දෝෂයක්." });
+    await sock.sendMessage(from, { text: "සර්වර් දෝෂයක් හෝ Timeout එකක්." });
   }
 }
 
